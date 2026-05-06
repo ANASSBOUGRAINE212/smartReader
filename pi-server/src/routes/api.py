@@ -14,10 +14,101 @@ logger = logging.getLogger(__name__)
 api_bp = Blueprint('api', __name__)
 
 
+@api_bp.route('/capture/upload', methods=['POST'])
+def capture_upload():
+    """
+    Upload image from phone for OCR
+    POST /api/capture/upload
+    Body: multipart/form-data with 'image' file
+    Returns: ScanResult
+    """
+    try:
+        from ..services.ocr_service import OCRService
+        from ..services.tts_service import TTSService
+        from ..services.history_service import HistoryService
+        from ..services.settings_service import SettingsService
+        import uuid
+        import numpy as np
+        from PIL import Image
+        import io
+        
+        # Check if image file is present
+        if 'image' not in request.files:
+            return jsonify({
+                'error': 'ValidationError',
+                'message': 'No image file provided'
+            }), 400
+        
+        file = request.files['image']
+        if file.filename == '':
+            return jsonify({
+                'error': 'ValidationError',
+                'message': 'Empty filename'
+            }), 400
+        
+        # Load settings
+        settings_service = SettingsService()
+        settings = settings_service.load_settings()
+        
+        # Read image from upload
+        image_bytes = file.read()
+        image = Image.open(io.BytesIO(image_bytes))
+        image_array = np.array(image)
+        
+        # Initialize services
+        ocr_service = OCRService()
+        tts_service = TTSService()
+        history_service = HistoryService()
+        
+        # Extract text with OCR
+        ocr_result = ocr_service.extract_text(image_array, engine=settings['ocrEngine'])
+        
+        if not ocr_result.text:
+            return jsonify({
+                'error': 'OCRError',
+                'message': 'No text detected in image'
+            }), 400
+        
+        # Generate scan ID
+        scan_id = str(uuid.uuid4())
+        
+        # Generate TTS audio
+        audio_path = tts_service.synthesize(
+            ocr_result.text,
+            language=settings['language'],
+            rate=settings['speechRate'],
+            pitch=settings['speechPitch']
+        )
+        
+        # Save to history
+        history_service.save_scan(
+            scan_id=scan_id,
+            text=ocr_result.text,
+            audio_path=audio_path,
+            language=ocr_result.detected_language,
+            paragraph_count=ocr_result.paragraph_count
+        )
+        
+        # Return scan result
+        audio_filename = os.path.basename(audio_path) if audio_path else None
+        return jsonify({
+            'id': scan_id,
+            'text': ocr_result.text,
+            'audioUrl': f'/audio/{audio_filename}' if audio_filename else None,
+            'timestamp': datetime.now().isoformat(),
+            'language': ocr_result.detected_language,
+            'paragraphCount': ocr_result.paragraph_count
+        }), 200
+        
+    except Exception as e:
+        logger.exception("Upload scan error")
+        return jsonify({'error': 'ScanError', 'message': str(e)}), 500
+
+
 @api_bp.route('/capture', methods=['POST'])
 def capture():
     """
-    Trigger document scan
+    Trigger document scan using Pi camera
     POST /api/capture
     Returns: ScanResult
     """
