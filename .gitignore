@@ -1,0 +1,41 @@
+# Old/unused directories - don't push to GitHub
+mobile-app/
+smartreader-mobile/
+
+# Node modules
+node_modules/
+**/node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+env/
+
+# Data files
+data/
+audio/
+*.mp3
+*.wav
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Environment
+.env
+.env.local
+
+# Build
+dist/
+build/
+.expo/
