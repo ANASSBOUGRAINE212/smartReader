@@ -3,7 +3,7 @@ SmartReader Pi Server - API Routes
 REST API endpoints for mobile app communication
 """
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from datetime import datetime
 from typing import Dict, Any
 import logging
@@ -12,6 +12,9 @@ import os
 logger = logging.getLogger(__name__)
 
 api_bp = Blueprint('api', __name__)
+
+# Audio directory path
+AUDIO_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'audio'))
 
 
 @api_bp.route('/capture/upload', methods=['POST'])
@@ -80,6 +83,12 @@ def capture_upload():
             pitch=settings['speechPitch']
         )
         
+        if audio_path and settings['audioOutput'] == 'pi-speaker':
+            logger.info("Playing audio on Pi speaker")
+            tts_service.play_audio(audio_path)
+            # Don't send audio URL to phone if playing on Pi
+            audio_path = None
+        
         # Save to history
         history_service.save_scan(
             scan_id=scan_id,
@@ -94,7 +103,7 @@ def capture_upload():
         return jsonify({
             'id': scan_id,
             'text': ocr_result.text,
-            'audioUrl': f'/audio/{audio_filename}' if audio_filename else None,
+            'audioUrl': f'/api/audio/{audio_filename}' if audio_filename else None,
             'timestamp': datetime.now().isoformat(),
             'language': ocr_result.detected_language,
             'paragraphCount': ocr_result.paragraph_count
@@ -108,12 +117,12 @@ def capture_upload():
 @api_bp.route('/capture', methods=['POST'])
 def capture():
     """
-    Trigger document scan using Pi camera
+    Trigger document scan using Pi camera with 10s preview
     POST /api/capture
     Returns: ScanResult
     """
     try:
-        from ..services.capture_service import CaptureService
+        from ..services.camera_preview import get_preview_instance
         from ..services.ocr_service import OCRService
         from ..services.tts_service import TTSService
         from ..services.history_service import HistoryService
@@ -130,26 +139,26 @@ def capture():
         language = request_data.get('language', settings['language'])
         speech_rate = request_data.get('speechRate', settings['speechRate'])
         speech_pitch = request_data.get('speechPitch', settings['speechPitch'])
+        preview_duration = request_data.get('previewDuration', 10)  # Default 10 seconds
         
         # Initialize services
-        capture_service = CaptureService()
+        preview = get_preview_instance()
         ocr_service = OCRService()
         tts_service = TTSService()
         history_service = HistoryService()
         
-        # Capture image
-        image = capture_service.capture_image()
+        # Capture image with preview
+        logger.info(f"Starting capture with {preview_duration}s preview")
+        image = preview.capture_with_preview(preview_duration=preview_duration)
+        
         if image is None:
             return jsonify({
                 'error': 'CaptureError',
                 'message': 'Failed to capture image from camera'
             }), 500
         
-        # Preprocess image
-        preprocessed = capture_service.preprocess_image(image)
-        
-        # Extract text with OCR
-        ocr_result = ocr_service.extract_text(preprocessed, engine=ocr_engine)
+        # Extract text with OCR (no preprocessing needed, preview already shows good image)
+        ocr_result = ocr_service.extract_text(image, engine=ocr_engine)
         
         # Check if text was extracted
         if not ocr_result.text:
@@ -171,6 +180,13 @@ def capture():
         
         if audio_path is None:
             logger.warning("TTS synthesis failed, returning text only")
+        else:
+            # Play audio on Pi speaker if configured
+            if settings['audioOutput'] == 'pi-speaker':
+                logger.info("Playing audio on Pi speaker")
+                tts_service.play_audio(audio_path)
+                # Don't send audio URL to phone if playing on Pi
+                audio_path = None
         
         # Save to history
         history_service.save_scan(
@@ -188,7 +204,7 @@ def capture():
         return jsonify({
             'id': scan_id,
             'text': ocr_result.text,
-            'audioUrl': f'/audio/{audio_filename}' if audio_filename else None,
+            'audioUrl': f'/api/audio/{audio_filename}' if audio_filename else None,
             'timestamp': datetime.now().isoformat(),
             'language': ocr_result.detected_language,
             'paragraphCount': ocr_result.paragraph_count
@@ -383,9 +399,10 @@ def translate():
             }), 200
         
         # Return translation result
+        audio_filename = os.path.basename(audio_path) if audio_path else None
         return jsonify({
             'translatedText': translated_text,
-            'audioUrl': f'/audio/{audio_filename}'
+            'audioUrl': f'/api/audio/{audio_filename}' if audio_filename else None
         }), 200
         
     except Exception as e:
@@ -403,3 +420,159 @@ def health_check():
         'status': 'ok',
         'timestamp': datetime.now().isoformat()
     }), 200
+
+
+@api_bp.route('/camera/preview', methods=['GET'])
+def camera_preview():
+    """
+    Get camera preview image
+    GET /api/camera/preview
+    Returns: JPEG image
+    """
+    try:
+        from ..services.capture_service import CaptureService
+        import cv2
+        
+        capture_service = CaptureService()
+        image = capture_service.capture_image()
+        
+        if image is None:
+            return jsonify({'error': 'CameraError', 'message': 'Failed to capture image'}), 500
+        
+        # Encode image as JPEG
+        success, buffer = cv2.imencode('.jpg', image)
+        if not success:
+            return jsonify({'error': 'EncodingError', 'message': 'Failed to encode image'}), 500
+        
+        # Return image
+        from flask import Response
+        return Response(buffer.tobytes(), mimetype='image/jpeg')
+        
+    except Exception as e:
+        logger.exception("Camera preview error")
+        return jsonify({'error': 'CameraError', 'message': str(e)}), 500
+
+
+@api_bp.route('/camera/view', methods=['GET'])
+def camera_view():
+    """
+    Serve camera preview HTML page
+    GET /api/camera/view
+    Returns: HTML page
+    """
+    try:
+        html_path = os.path.join(os.path.dirname(__file__), '..', '..', 'camera_view.html')
+        return send_file(html_path)
+    except Exception as e:
+        logger.exception("Camera view error")
+        return jsonify({'error': 'FileError', 'message': str(e)}), 500
+
+
+@api_bp.route('/audio/<filename>', methods=['GET'])
+def serve_audio(filename: str):
+    """
+    Serve audio files
+    GET /api/audio/<filename>
+    Returns: Audio file (MP3)
+    """
+    try:
+        # Sanitize filename to prevent directory traversal
+        filename = os.path.basename(filename)
+        
+        # Ensure audio directory exists
+        if not os.path.exists(AUDIO_DIR):
+            logger.error(f"Audio directory not found: {AUDIO_DIR}")
+            return jsonify({'error': 'NotFound', 'message': 'Audio directory not found'}), 404
+        
+        # Construct absolute file path
+        file_path = os.path.abspath(os.path.join(AUDIO_DIR, filename))
+        
+        # Verify the file is within AUDIO_DIR (security check)
+        if not file_path.startswith(os.path.abspath(AUDIO_DIR)):
+            logger.error(f"Invalid file path: {file_path}")
+            return jsonify({'error': 'Forbidden', 'message': 'Invalid file path'}), 403
+        
+        # Check if file exists
+        if not os.path.exists(file_path):
+            logger.error(f"Audio file not found: {file_path}")
+            return jsonify({'error': 'NotFound', 'message': f'Audio file not found: {filename}'}), 404
+        
+        # Serve the file
+        logger.info(f"Serving audio file: {file_path}")
+        return send_file(file_path, mimetype='audio/mpeg', as_attachment=False)
+        
+    except Exception as e:
+        logger.exception("Audio serving error")
+        return jsonify({'error': 'FileError', 'message': str(e)}), 500
+
+
+@api_bp.route('/camera/preview/start', methods=['POST'])
+def start_camera_preview():
+    """
+    Start camera preview window on Pi
+    POST /api/camera/preview/start
+    Returns: Success message
+    """
+    try:
+        from ..services.camera_preview import start_camera_preview as start_preview
+        
+        start_preview()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Camera preview started'
+        }), 200
+        
+    except Exception as e:
+        logger.exception("Failed to start camera preview")
+        return jsonify({
+            'error': 'PreviewError',
+            'message': str(e)
+        }), 500
+
+
+@api_bp.route('/camera/preview/stop', methods=['POST'])
+def stop_camera_preview():
+    """
+    Stop camera preview window on Pi
+    POST /api/camera/preview/stop
+    Returns: Success message
+    """
+    try:
+        from ..services.camera_preview import stop_camera_preview as stop_preview
+        
+        stop_preview()
+        
+        return jsonify({
+            'status': 'success',
+            'message': 'Camera preview stopped'
+        }), 200
+        
+    except Exception as e:
+        logger.exception("Failed to stop camera preview")
+        return jsonify({
+            'error': 'PreviewError',
+            'message': str(e)
+        }), 500
+
+
+@api_bp.route('/camera/preview/status', methods=['GET'])
+def camera_preview_status():
+    """
+    Get camera preview status
+    GET /api/camera/preview/status
+    Returns: Preview status
+    """
+    try:
+        from ..services.camera_preview import is_preview_running
+        
+        return jsonify({
+            'running': is_preview_running()
+        }), 200
+        
+    except Exception as e:
+        logger.exception("Failed to get preview status")
+        return jsonify({
+            'error': 'PreviewError',
+            'message': str(e)
+        }), 500

@@ -72,7 +72,7 @@ class HistoryService:
                 'id': scan_id,
                 'title': title,
                 'text': text,
-                'audioUrl': f'/audio/{os.path.basename(audio_path)}' if audio_path else None,
+                'audioUrl': f'/api/audio/{os.path.basename(audio_path)}' if audio_path else None,
                 'timestamp': datetime.now().isoformat(),
                 'language': language,
                 'paragraphCount': paragraph_count

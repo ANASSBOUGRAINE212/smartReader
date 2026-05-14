@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>SmartReader Camera Preview</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            font-family: Arial, sans-serif;
+            text-align: center;
+        }
+        h1 {
+            color: #fff;
+            margin-bottom: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        #preview {
+            max-width: 100%;
+            border: 3px solid #4CAF50;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        .status {
+            color: #4CAF50;
+            margin-top: 10px;
+            font-size: 14px;
+        }
+        .error {
+            color: #f44336;
+        }
+        .controls {
+            margin-top: 20px;
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 0 5px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        button:disabled {
+            background: #666;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📷 SmartReader Camera Preview</h1>
+        <img id="preview" src="/api/camera/preview" alt="Camera Preview" />
+        <div class="status" id="status">Live Preview Active</div>
+        <div class="controls">
+            <button id="pauseBtn" onclick="togglePause()">⏸️ Pause</button>
+            <button onclick="refreshNow()">🔄 Refresh Now</button>
+        </div>
+    </div>
+
+    <script>
+        let isPaused = false;
+        let refreshInterval;
+
+        function updatePreview() {
+            if (!isPaused) {
+                const img = document.getElementById('preview');
+                const timestamp = new Date().getTime();
+                img.src = '/api/camera/preview?' + timestamp;
+                document.getElementById('status').textContent = 'Last updated: ' + new Date().toLocaleTimeString();
+                document.getElementById('status').className = 'status';
+            }
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            const btn = document.getElementById('pauseBtn');
+            if (isPaused) {
+                btn.textContent = '▶️ Resume';
+                document.getElementById('status').textContent = 'Preview Paused';
+                document.getElementById('status').className = 'status error';
+            } else {
+                btn.textContent = '⏸️ Pause';
+                updatePreview();
+            }
+        }
+
+        function refreshNow() {
+            updatePreview();
+        }
+
+        // Handle image load errors
+        document.getElementById('preview').onerror = function() {
+            document.getElementById('status').textContent = 'Camera Error - Check connection';
+            document.getElementById('status').className = 'status error';
+        };
+
+        // Start auto-refresh (every 500ms = 2 FPS)
+        refreshInterval = setInterval(updatePreview, 500);
+
+        // Initial load
+        updatePreview();
+    </script>
+</body>
+</html>

@@ -1,51 +1,39 @@
 """
 SmartReader Pi Server - TTS Service
-Handles text-to-speech synthesis using Coqui TTS and Google TTS
+Handles text-to-speech conversion using gTTS (Google Text-to-Speech)
 """
 
-from typing import Optional
-import logging
 import os
+import logging
+from typing import Optional
+import uuid
 
 logger = logging.getLogger(__name__)
 
 
 class TTSService:
     """
-    Service for text-to-speech synthesis
-    Supports Coqui TTS (primary) and Google TTS (fallback)
-    Languages: Arabic, French, English, Darija
+    Service for text-to-speech conversion
+    Uses gTTS for fast and reliable speech synthesis
     """
     
     def __init__(self):
         """Initialize TTS service"""
-        self.coqui_available = self._check_coqui()
-        self.google_tts_available = self._check_google_tts()
-        self.audio_dir = os.path.join(os.path.dirname(__file__), '../../audio')
+        # Create audio directory if it doesn't exist
+        self.audio_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'audio')
         os.makedirs(self.audio_dir, exist_ok=True)
+        
+        self.gtts_available = self._check_gtts()
+        logger.info(f"TTS Service initialized. gTTS available: {self.gtts_available}")
     
-    def _check_coqui(self) -> bool:
-        """Check if Coqui TTS is available"""
+    def _check_gtts(self) -> bool:
+        """Check if gTTS is available"""
         try:
-            from TTS.api import TTS
-            logger.info("Coqui TTS available")
+            from gtts import gTTS
+            logger.info("gTTS available")
             return True
-        except Exception as e:
-            logger.warning(f"Coqui TTS not available: {e}")
-            return False
-    
-    def _check_google_tts(self) -> bool:
-        """Check if Google TTS is configured"""
-        try:
-            from google.cloud import texttospeech
-            if os.getenv('GOOGLE_APPLICATION_CREDENTIALS'):
-                logger.info("Google TTS available")
-                return True
-            else:
-                logger.warning("Google TTS credentials not configured")
-                return False
         except ImportError:
-            logger.warning("Google TTS library not installed")
+            logger.warning("gTTS not installed. Install with: pip install gtts")
             return False
     
     def synthesize(
@@ -57,244 +45,115 @@ class TTSService:
         output_path: Optional[str] = None
     ) -> Optional[str]:
         """
-        Synthesize speech from text
+        Generate speech audio from text using gTTS
         
         Args:
-            text: Text to synthesize
-            language: Target language ('arabic', 'french', 'english', 'darija')
-            rate: Speech rate (0.5 - 2.0)
-            pitch: Speech pitch ('low', 'normal', 'high')
-            output_path: Optional output file path
+            text: Text to convert to speech
+            language: Target language ('french' or 'english')
+            rate: Speech rate (not used by gTTS, kept for compatibility)
+            pitch: Speech pitch (not used by gTTS, kept for compatibility)
+            output_path: Optional output path (auto-generated if None)
             
         Returns:
-            Path to generated audio file, or None if synthesis fails
+            Path to generated audio file, or None if failed
         """
         if not text or not text.strip():
-            logger.error("Empty text provided for TTS")
+            logger.warning("Empty text provided for TTS")
             return None
         
-        # Validate rate
-        rate = max(0.5, min(2.0, rate))
-        
-        # Try Coqui TTS first, fallback to Google TTS
-        if self.coqui_available:
-            return self._synthesize_with_coqui(text, language, rate, pitch, output_path)
-        elif self.google_tts_available:
-            return self._synthesize_with_google(text, language, rate, pitch, output_path)
-        else:
-            logger.error("No TTS engine available")
+        if not self.gtts_available:
+            logger.error("gTTS not available")
             return None
-    
-    def _synthesize_with_coqui(
-        self,
-        text: str,
-        language: str,
-        rate: float,
-        pitch: str,
-        output_path: Optional[str]
-    ) -> Optional[str]:
-        """
-        Synthesize speech using Coqui TTS
         
-        Args:
-            text: Text to synthesize
-            language: Target language
-            rate: Speech rate
-            pitch: Speech pitch
-            output_path: Output file path
-            
-        Returns:
-            Path to generated audio file
-        """
         try:
-            from TTS.api import TTS
+            from gtts import gTTS
             
-            # Map language to Coqui model
-            model_map = {
-                'arabic': 'tts_models/ar/cv/vits',
-                'french': 'tts_models/fr/css10/vits',
-                'english': 'tts_models/en/ljspeech/tacotron2-DDC',
-                'darija': 'tts_models/ar/cv/vits',  # Use Arabic model for Darija
+            # Map language codes
+            lang_map = {
+                'french': 'fr',
+                'english': 'en',
             }
-            
-            model_name = model_map.get(language, model_map['french'])
-            
-            # Initialize TTS model
-            tts = TTS(model_name=model_name)
+            tts_lang = lang_map.get(language, 'fr')
             
             # Generate output path if not provided
             if output_path is None:
-                import uuid
-                filename = f"{uuid.uuid4()}.wav"
-                output_path = os.path.join(self.audio_dir, filename)
+                audio_filename = f"{uuid.uuid4()}.mp3"
+                output_path = os.path.join(self.audio_dir, audio_filename)
             
-            # Synthesize speech
-            # Note: Coqui TTS doesn't directly support rate/pitch adjustment
-            # These would need to be applied post-processing with audio libraries
-            tts.tts_to_file(text=text, file_path=output_path)
+            # Generate speech
+            logger.info(f"Generating TTS for {len(text)} characters in {language}")
+            tts = gTTS(text=text, lang=tts_lang, slow=False)
+            tts.save(output_path)
             
-            # Apply rate and pitch adjustments if needed
-            if rate != 1.0 or pitch != 'normal':
-                output_path = self._adjust_audio(output_path, rate, pitch)
-            
-            logger.info(f"Coqui TTS synthesis complete: {output_path}")
+            logger.info(f"TTS audio generated: {output_path}")
             return output_path
             
         except Exception as e:
-            logger.error(f"Coqui TTS synthesis error: {e}")
+            logger.error(f"TTS generation failed: {e}")
             return None
     
-    def _synthesize_with_google(
-        self,
-        text: str,
-        language: str,
-        rate: float,
-        pitch: str,
-        output_path: Optional[str]
-    ) -> Optional[str]:
+    def play_audio(self, audio_path: str) -> bool:
         """
-        Synthesize speech using Google TTS
-        
-        Args:
-            text: Text to synthesize
-            language: Target language
-            rate: Speech rate
-            pitch: Speech pitch
-            output_path: Output file path
-            
-        Returns:
-            Path to generated audio file
-        """
-        try:
-            from google.cloud import texttospeech
-            
-            # Initialize client
-            client = texttospeech.TextToSpeechClient()
-            
-            # Map language to Google TTS language code
-            language_map = {
-                'arabic': 'ar-XA',
-                'french': 'fr-FR',
-                'english': 'en-US',
-                'darija': 'ar-XA',  # Use Arabic for Darija
-            }
-            
-            lang_code = language_map.get(language, 'fr-FR')
-            
-            # Set synthesis input
-            synthesis_input = texttospeech.SynthesisInput(text=text)
-            
-            # Select voice
-            voice = texttospeech.VoiceSelectionParams(
-                language_code=lang_code,
-                ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
-            )
-            
-            # Map pitch to semitones
-            pitch_map = {
-                'low': -2.0,
-                'normal': 0.0,
-                'high': 2.0
-            }
-            pitch_value = pitch_map.get(pitch, 0.0)
-            
-            # Configure audio
-            audio_config = texttospeech.AudioConfig(
-                audio_encoding=texttospeech.AudioEncoding.MP3,
-                speaking_rate=rate,
-                pitch=pitch_value
-            )
-            
-            # Perform synthesis
-            response = client.synthesize_speech(
-                input=synthesis_input,
-                voice=voice,
-                audio_config=audio_config
-            )
-            
-            # Generate output path if not provided
-            if output_path is None:
-                import uuid
-                filename = f"{uuid.uuid4()}.mp3"
-                output_path = os.path.join(self.audio_dir, filename)
-            
-            # Write audio to file
-            with open(output_path, 'wb') as out:
-                out.write(response.audio_content)
-            
-            logger.info(f"Google TTS synthesis complete: {output_path}")
-            return output_path
-            
-        except Exception as e:
-            logger.error(f"Google TTS synthesis error: {e}")
-            return None
-    
-    def _adjust_audio(
-        self,
-        audio_path: str,
-        rate: float,
-        pitch: str
-    ) -> str:
-        """
-        Adjust audio rate and pitch using pydub
+        Play audio file on Pi speaker
         
         Args:
             audio_path: Path to audio file
-            rate: Speech rate multiplier
-            pitch: Pitch adjustment
             
         Returns:
-            Path to adjusted audio file
+            True if playback succeeded, False otherwise
         """
+        if not os.path.exists(audio_path):
+            logger.error(f"Audio file not found: {audio_path}")
+            return False
+        
         try:
-            from pydub import AudioSegment
-            from pydub.effects import speedup
+            # Try mpg123 first (faster)
+            result = os.system(f"mpg123 -q {audio_path}")
+            if result == 0:
+                logger.info(f"Audio played successfully: {audio_path}")
+                return True
             
-            # Load audio
-            audio = AudioSegment.from_file(audio_path)
+            # Fallback to omxplayer
+            result = os.system(f"omxplayer {audio_path}")
+            if result == 0:
+                logger.info(f"Audio played successfully with omxplayer: {audio_path}")
+                return True
             
-            # Adjust speed (rate)
-            if rate != 1.0:
-                # Speed up or slow down
-                if rate > 1.0:
-                    audio = speedup(audio, playback_speed=rate)
-                else:
-                    # Slow down by changing frame rate
-                    audio = audio._spawn(
-                        audio.raw_data,
-                        overrides={'frame_rate': int(audio.frame_rate * rate)}
-                    )
-                    audio = audio.set_frame_rate(44100)
-            
-            # Adjust pitch (requires octaves parameter)
-            pitch_map = {
-                'low': -2,
-                'normal': 0,
-                'high': 2
-            }
-            octaves = pitch_map.get(pitch, 0) / 12.0
-            
-            if octaves != 0:
-                new_sample_rate = int(audio.frame_rate * (2.0 ** octaves))
-                audio = audio._spawn(
-                    audio.raw_data,
-                    overrides={'frame_rate': new_sample_rate}
-                )
-                audio = audio.set_frame_rate(44100)
-            
-            # Save adjusted audio
-            adjusted_path = audio_path.replace('.wav', '_adjusted.wav').replace('.mp3', '_adjusted.mp3')
-            audio.export(adjusted_path, format='mp3' if audio_path.endswith('.mp3') else 'wav')
-            
-            # Remove original file
-            os.remove(audio_path)
-            
-            logger.info(f"Audio adjusted: rate={rate}, pitch={pitch}")
-            return adjusted_path
+            logger.error("Failed to play audio with both mpg123 and omxplayer")
+            return False
             
         except Exception as e:
-            logger.error(f"Audio adjustment error: {e}")
-            return audio_path
+            logger.error(f"Audio playback error: {e}")
+            return False
+    
+    def cleanup_old_audio(self, max_files: int = 50):
+        """
+        Clean up old audio files to save disk space
+        
+        Args:
+            max_files: Maximum number of audio files to keep
+        """
+        try:
+            audio_files = [
+                os.path.join(self.audio_dir, f)
+                for f in os.listdir(self.audio_dir)
+                if f.endswith('.mp3')
+            ]
+            
+            # Sort by modification time
+            audio_files.sort(key=lambda x: os.path.getmtime(x))
+            
+            # Delete oldest files if we exceed max_files
+            if len(audio_files) > max_files:
+                files_to_delete = audio_files[:-max_files]
+                for file_path in files_to_delete:
+                    os.remove(file_path)
+                    logger.info(f"Deleted old audio file: {file_path}")
+                
+                logger.info(f"Cleaned up {len(files_to_delete)} old audio files")
+        
+        except Exception as e:
+            logger.error(f"Audio cleanup error: {e}")
     
     def get_audio_path(self, filename: str) -> str:
         """

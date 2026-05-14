@@ -105,20 +105,20 @@ class OCRService:
             pil_image = Image.fromarray(image)
             
             # Configure Tesseract for multiple languages
-            # ara: Arabic, fra: French, eng: English
+            # fra: French, eng: English
             config = '--oem 3 --psm 3'
             
-            # Extract text
+            # Extract text with French and English
             text = pytesseract.image_to_string(
                 pil_image,
-                lang='ara+fra+eng',
+                lang='fra+eng',
                 config=config
             )
             
             # Get detailed data for confidence and language detection
             data = pytesseract.image_to_data(
                 pil_image,
-                lang='ara+fra+eng',
+                lang='fra+eng',
                 config=config,
                 output_type=pytesseract.Output.DICT
             )
