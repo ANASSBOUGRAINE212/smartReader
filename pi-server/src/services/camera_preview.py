@@ -137,7 +137,7 @@ class CameraPreview:
     
     def capture_with_preview(self, preview_duration: int = 10) -> Optional[np.ndarray]:
         """
-        Show preview for specified duration, then capture frame
+        Show preview for specified duration with countdown, then capture frame
         
         Args:
             preview_duration: Duration in seconds to show preview before capture
@@ -149,34 +149,105 @@ class CameraPreview:
         
         logger.info(f"Starting {preview_duration}s preview before capture")
         
-        # Start preview if not already running
-        was_running = self.is_running
-        if not was_running:
-            self.start_preview()
-            time.sleep(0.5)  # Give camera time to initialize
-        
-        # Wait for preview duration with countdown
-        for remaining in range(preview_duration, 0, -1):
-            if not self.is_running:
-                logger.error("Preview stopped during countdown")
+        try:
+            # Initialize camera
+            camera = cv2.VideoCapture(0)
+            
+            if not camera.isOpened():
+                logger.error("Failed to open camera")
                 return None
-            time.sleep(1)
-            logger.info(f"Capturing in {remaining} seconds...")
-        
-        # Capture frame
-        frame = self.capture_frame()
-        
-        # Stop preview if we started it (set flag but don't join thread)
-        if not was_running:
-            self.is_running = False
-            if self.camera:
-                self.camera.release()
-                self.camera = None
+                
+            # Set camera properties
+            camera.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            camera.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            
+            # Create window
+            window_name = "Camera"
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(window_name, 800, 600)
+            
+            logger.info("Preview window opened with countdown")
+            
+            # Show preview with countdown
+            start_time = time.time()
+            captured_frame = None
+            
+            while True:
+                ret, frame = camera.read()
+                
+                if not ret:
+                    logger.error("Failed to read frame")
+                    break
+                
+                # Calculate remaining time
+                elapsed = time.time() - start_time
+                remaining = max(0, preview_duration - int(elapsed))
+                
+                # Add countdown overlay
+                self._add_countdown_overlay(frame, remaining)
+                
+                # Display frame
+                cv2.imshow(window_name, frame)
+                
+                # Check if countdown finished
+                if remaining == 0:
+                    logger.info("Countdown finished, capturing frame")
+                    captured_frame = frame.copy()
+                    break
+                
+                # Check for ESC key to cancel
+                key = cv2.waitKey(100) & 0xFF
+                if key == 27:
+                    logger.info("Capture cancelled by user")
+                    break
+                    
+                # Check if window was closed
+                if cv2.getWindowProperty(window_name, cv2.WND_PROP_VISIBLE) < 1:
+                    logger.info("Preview window closed by user")
+                    break
+            
+            # Cleanup
+            camera.release()
             cv2.destroyAllWindows()
-            logger.info("Preview closed after capture")
+            logger.info("Preview window closed")
+            
+            return captured_frame
+            
+        except Exception as e:
+            logger.exception(f"Error in capture with preview: {e}")
+            return None
+    
+    def _add_countdown_overlay(self, frame, remaining: int):
+        """Add countdown overlay to frame"""
+        height, width = frame.shape[:2]
         
-        logger.info("Frame captured successfully")
-        return frame
+        # Add semi-transparent overlay at top
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (width, 80), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.7, frame, 0.3, 0, frame)
+        
+        # Add countdown only (no title)
+        if remaining > 0:
+            countdown_text = f"Capturing in {remaining} seconds..."
+            cv2.putText(
+                frame,
+                countdown_text,
+                (10, 45),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                (0, 255, 255),
+                3
+            )
+        else:
+            cv2.putText(
+                frame,
+                "Capturing now!",
+                (10, 45),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1.2,
+                (0, 255, 0),
+                3
+            )
 
 
 # Global instance

@@ -197,6 +197,51 @@ class HistoryService:
             logger.error(f"Failed to delete history entry: {e}")
             return False
     
+    def clear_all(self) -> int:
+        """
+        Clear all history entries and delete all audio files
+        
+        Returns:
+            Number of entries cleared
+        """
+        try:
+            history = self._load_history()
+            count = len(history)
+            
+            # Delete all audio files
+            for entry in history:
+                # Delete main audio file
+                if entry.get('audioUrl'):
+                    audio_filename = os.path.basename(entry['audioUrl'])
+                    audio_path = os.path.join(self.audio_dir, audio_filename)
+                    if os.path.exists(audio_path):
+                        try:
+                            os.remove(audio_path)
+                            logger.info(f"Deleted audio file: {audio_path}")
+                        except Exception as e:
+                            logger.error(f"Failed to delete audio file {audio_path}: {e}")
+                
+                # Delete translated audio file
+                if entry.get('translated', {}).get('audioUrl'):
+                    audio_filename = os.path.basename(entry['translated']['audioUrl'])
+                    audio_path = os.path.join(self.audio_dir, audio_filename)
+                    if os.path.exists(audio_path):
+                        try:
+                            os.remove(audio_path)
+                            logger.info(f"Deleted translated audio file: {audio_path}")
+                        except Exception as e:
+                            logger.error(f"Failed to delete translated audio file {audio_path}: {e}")
+            
+            # Clear history
+            self._save_history([])
+            
+            logger.info(f"Cleared all history: {count} entries deleted")
+            return count
+            
+        except Exception as e:
+            logger.error(f"Failed to clear all history: {e}")
+            raise
+    
     def _generate_title(self, text: str) -> str:
         """
         Generate title from text (first 6 words)

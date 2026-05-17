@@ -83,11 +83,14 @@ def capture_upload():
             pitch=settings['speechPitch']
         )
         
+        # Play audio on Pi speaker if configured, otherwise send URL to phone
         if audio_path and settings['audioOutput'] == 'pi-speaker':
             logger.info("Playing audio on Pi speaker")
             tts_service.play_audio(audio_path)
             # Don't send audio URL to phone if playing on Pi
             audio_path = None
+        elif audio_path:
+            logger.info(f"Audio will be played on: {settings['audioOutput']}")
         
         # Save to history
         history_service.save_scan(
@@ -181,12 +184,14 @@ def capture():
         if audio_path is None:
             logger.warning("TTS synthesis failed, returning text only")
         else:
-            # Play audio on Pi speaker if configured
+            # Play audio on Pi speaker if configured, otherwise send URL to phone
             if settings['audioOutput'] == 'pi-speaker':
                 logger.info("Playing audio on Pi speaker")
                 tts_service.play_audio(audio_path)
                 # Don't send audio URL to phone if playing on Pi
                 audio_path = None
+            else:
+                logger.info(f"Audio will be played on: {settings['audioOutput']}")
         
         # Save to history
         history_service.save_scan(
@@ -231,6 +236,29 @@ def get_history():
         return jsonify(history), 200
     except Exception as e:
         logger.exception("History retrieval error")
+        return jsonify({'error': 'HistoryError', 'message': str(e)}), 500
+
+
+@api_bp.route('/history', methods=['DELETE'])
+def clear_all_history():
+    """
+    Clear all history entries and delete all audio files
+    DELETE /api/history
+    Returns: Success response
+    """
+    try:
+        from ..services.history_service import HistoryService
+        
+        history_service = HistoryService()
+        count = history_service.clear_all()
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleared {count} entries',
+            'count': count
+        }), 200
+    except Exception as e:
+        logger.exception("Clear all history error")
         return jsonify({'error': 'HistoryError', 'message': str(e)}), 500
 
 

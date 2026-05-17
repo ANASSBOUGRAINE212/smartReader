@@ -1,25 +1,29 @@
 # SmartReader Pi Server
 
-Flask-based REST API server running on Raspberry Pi 3B for document scanning, OCR, and text-to-speech.
+Flask-based REST API server running on Raspberry Pi 3B for document scanning, OCR, text-to-speech, and blind assistance with real-time object detection.
 
 ## Features
 
-- REST API for mobile app communication
-- WebSocket audio streaming
-- Camera control with LED ring lighting
-- OCR with Tesseract (offline) and Google Vision API (cloud)
-- Multi-language TTS (Arabic, French, English, Darija)
-- Translation service
-- Reading history persistence
-- Settings management
+- **REST API**: Flask-based endpoints for mobile app communication
+- **WebSocket Streaming**: Real-time audio and video streaming
+- **Camera Control**: Logitech C270 camera with LED ring lighting
+- **OCR Processing**: Tesseract (offline) and Google Vision API (cloud)
+- **Multi-language TTS**: Arabic, French, English, and Darija support
+- **Translation Service**: Text translation between languages
+- **Blind Assistant**: YOLOv8-based real-time object detection for navigation
+- **Reading History**: Persistent storage of scanned documents
+- **Settings Management**: Customizable language, speech, and audio preferences
+- **Dual Camera Support**: Phone camera and Raspberry Pi camera modes
 
 ## Prerequisites
 
 - Python 3.9+
-- Raspberry Pi 3B
+- Raspberry Pi 3B or 4
 - Logitech C270 camera with LED ring lighting
 - Tesseract OCR installed
 - GPIO-connected speaker (optional)
+- YOLOv8 model for object detection
+- picamera2 library (for Pi camera support)
 
 ## Installation
 
@@ -81,16 +85,22 @@ pi-server/
 
 ## API Endpoints
 
-- `POST /api/capture` - Trigger document scan
+### Document Scanning & OCR
+- `POST /api/capture` - Trigger document scan and OCR processing
 - `GET /api/history` - Get all history entries
 - `GET /api/history/<id>` - Get specific history entry
 - `DELETE /api/history/<id>` - Delete history entry
+
+### Settings & Control
 - `GET /api/settings` - Get current settings
-- `POST /api/settings` - Update settings
+- `POST /api/settings` - Update settings (language, speech, audio output)
 - `POST /api/stop` - Stop audio playback
-- `POST /api/translate` - Translate text
-- `GET /api/health` - Health check
+- `POST /api/translate` - Translate text between languages
+- `GET /api/health` - Health check endpoint
+
+### WebSocket Endpoints
 - `WS /ws/audio` - WebSocket audio streaming
+- `WS /ws` - WebSocket for blind assistant (object detection streaming)
 
 ## Configuration
 
@@ -101,6 +111,26 @@ Settings are stored in `config/settings.json` with the following defaults:
 - Reading mode: Continuous
 - Audio output: Pi speaker
 - OCR engine: Tesseract
+- Camera mode: Phone camera
+- Object detection: Enabled
+
+## Blind Assistant Mode
+
+The blind assistant feature uses YOLOv8 nano model for real-time object detection:
+
+```bash
+# Run blind assistant server
+python blind_assistant_server.py
+```
+
+Features:
+- Real-time object detection with YOLOv8
+- Distance estimation based on object size
+- Relevant object filtering (person, chair, car, stairs, etc.)
+- Live video preview with annotations
+- WebSocket communication for mobile app
+- Support for both phone and Pi camera modes
+- Audio feedback routing (phone or Pi speaker)
 
 ## Hardware Setup
 
